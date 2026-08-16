@@ -32,6 +32,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 GUILD_ID = 1429466809110626377  # OGS Community Sunucu ID
 MY_ID = 1266281343957078029     # Hasan (Sınırsız Kota & Yetkili)
+GUILD_OBJ = discord.Object(id=GUILD_ID)
 
 # --- VERİTABANI İŞLEMLERİ ---
 async def init_db():
@@ -100,31 +101,8 @@ class AccessRequestView(discord.ui.View):
         except Exception:
             pass
 
-# --- BOT HAZIR OLDUĞUNDA ---
-@bot.event
-async def on_ready():
-    await init_db()
-    
-    if not check_daily_reset.is_running():
-        check_daily_reset.start()
-    
-    guild_obj = discord.Object(id=GUILD_ID)
-    try:
-        # 1. Önce bu sunucudaki eski/çakışan komut ağacını tamamen temizle
-        bot.tree.clear_commands(guild=guild_obj)
-        
-        # 2. Komutları doğrudan OGS sunucusuna kopyala ve senkronize et
-        bot.tree.copy_global_to_guild(guild=guild_obj)
-        synced = await bot.tree.sync(guild=guild_obj)
-        
-        print(f"✅ BAŞARILI: {len(synced)} komut OGS sunucusuna yüklendi!")
-    except Exception as e:
-        print(f"❌ Komut senkronizasyon hatası: {e}")
-
-    print(f"✅ {bot.user.name} çalışmaya hazır!")
-
 # --- /KOTA KOMUTU ---
-@bot.tree.command(name="kota", description="Mevcut günlük klip kotanızı kontrol edin.")
+@bot.tree.command(name="kota", description="Mevcut günlük klip kotanızı kontrol edin.", guild=GUILD_OBJ)
 async def kota(interaction: discord.Interaction):
     user_id = interaction.user.id
 
@@ -152,7 +130,7 @@ async def kota(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # --- /CLIP KOMUTU ---
-@bot.tree.command(name="clip", description="Clip linki gönderirsiniz ve kotanızdan 1 düşer.")
+@bot.tree.command(name="clip", description="Clip linki gönderirsiniz ve kotanızdan 1 düşer.", guild=GUILD_OBJ)
 async def clip(interaction: discord.Interaction, link: str):
     user_id = interaction.user.id
 
@@ -198,7 +176,7 @@ async def clip(interaction: discord.Interaction, link: str):
             await interaction.response.send_message(embed=embed)
 
 # --- /ERISIM KOMUTU ---
-@bot.tree.command(name="erisim", description="Bir comp için erişim talebinde bulunursunuz.")
+@bot.tree.command(name="erisim", description="Bir comp için erişim talebinde bulunursunuz.", guild=GUILD_OBJ)
 @app_commands.describe(comp_adi="Erişim istemek istediğiniz comp veya projenin adı")
 async def erisim(interaction: discord.Interaction, comp_adi: str):
     requester = interaction.user
@@ -226,6 +204,23 @@ async def erisim(interaction: discord.Interaction, comp_adi: str):
             f"❌ Talebiniz iletilirken bir hata oluştu: {e}",
             ephemeral=True
         )
+
+# --- BOT HAZIR OLDUĞUNDA ---
+@bot.event
+async def on_ready():
+    await init_db()
+    
+    if not check_daily_reset.is_running():
+        check_daily_reset.start()
+    
+    try:
+        # Doğrudan OGS sunucusuna tanımlanan komutları senkronize et
+        synced = await bot.tree.sync(guild=GUILD_OBJ)
+        print(f"✅ BİNGO: {len(synced)} komut OGS sunucusuna sıfır hatayla yüklendi!")
+    except Exception as e:
+        print(f"❌ Komut senkronizasyon hatası: {e}")
+
+    print(f"✅ {bot.user.name} başarıyla bağlandı!")
 
 # --- BOTU BAŞLAT ---
 if __name__ == "__main__":
