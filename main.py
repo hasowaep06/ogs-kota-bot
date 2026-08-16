@@ -102,5 +102,12 @@ async def clip_al(interaction: discord.Interaction, clip_url: str):
     )
     embed.set_footer(text="OGS Community • Premium Clip Sistemi")
     await interaction.response.send_message(embed=embed)
+from flask import Flask
+from threading import Thread
+
+app = Flask('')
+@app.route('/')
+def home(): return "Bot Aktif!"
+Thread(target=lambda: app.run(host='0.0.0.0', port=10000)).start()
 
 bot.run(TOKEN)
