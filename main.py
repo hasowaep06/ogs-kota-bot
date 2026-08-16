@@ -30,8 +30,8 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-GUILD_ID = 1429466809110626377
-MY_ID = 1266281343957078029  # Senin Discord ID'n (Sınırsız Kota & Yetkili)
+GUILD_ID = 1429466809110626377  # OGS Community Sunucu ID'n
+MY_ID = 1266281343957078029     # Senin Discord ID'n (Sınırsız Kota & Yetkili)
 
 # --- VERİTABANI İŞLEMLERİ ---
 async def init_db():
@@ -108,15 +108,16 @@ async def on_ready():
     if not check_daily_reset.is_running():
         check_daily_reset.start()
     
-    guild = discord.Object(id=GUILD_ID)
+    guild_obj = discord.Object(id=GUILD_ID)
     try:
-        bot.tree.copy_global_to_guild(guild=guild)
-        synced = await bot.tree.sync(guild=guild)
-        print(f"✅ {len(synced)} komut OGS sunucusuna başarıyla senkronize edildi!")
+        # Sunucuya özel komut ağacını kopyalayıp anında senkronize ediyoruz
+        bot.tree.copy_global_to_guild(guild=guild_obj)
+        synced = await bot.tree.sync(guild=guild_obj)
+        print(f"✅ {len(synced)} komut OGS Community sunucusuna (ID: {GUILD_ID}) başarıyla senkronize edildi!")
     except Exception as e:
         print(f"❌ Komut senkronizasyon hatası: {e}")
 
-    print(f"✅ {bot.user.name} OGS Community için başarıyla bağlandı!")
+    print(f"✅ {bot.user.name} başarıyla bağlandı!")
 
 # --- /KOTA KOMUTU ---
 @bot.tree.command(name="kota", description="Mevcut günlük klip kotanızı kontrol edin.")
