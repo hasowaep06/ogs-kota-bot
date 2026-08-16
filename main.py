@@ -1,114 +1,160 @@
-import asyncio
-from datetime import time, timezone
+import os
+import sqlite3
 import aiosqlite
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+from flask import Flask
+from threading import Thread
+import datetime
 
-# --- BOT VE SUNUCU AYARLARI ---
-import os
-TOKEN = os.getenv("DISCORD_TOKEN")
+# --- FLASK WEB SERVER (Render 7/24 Aktif Tutmak İçin) ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "OGS Kota Botu 7/24 Aktif!"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=10000)
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.daemon = True
+    t.start()
+
+# --- DISCORD BOT AYARLARI ---
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
+
 GUILD_ID = 1429466809110626377
 PREMIUM_ROLE_ID = 1429471364225433620
-MAX_KOTA = 10
-
-# --- BOT TANIMLAMA ---
-intents = discord.Intents.default()
-intents.members = True
-bot = commands.Bot(command_prefix=".", intents=intents)
+MY_ID = 1266281343957078029  # Senin Discord ID'n (Sınırsız Kota)
 
 # --- VERİTABANI İŞLEMLERİ ---
 async def init_db():
     async with aiosqlite.connect("kota.db") as db:
         await db.execute("""
-            CREATE TABLE IF NOT EXISTS kullanicilar (
+            CREATE TABLE IF NOT EXISTS quotas (
                 user_id INTEGER PRIMARY KEY,
-                kalan_kota INTEGER DEFAULT 10
+                remaining_quota INTEGER DEFAULT 10,
+                last_reset DATE
             )
         """)
         await db.commit()
 
-async def get_kota(user_id: int) -> int:
-    async with aiosqlite.connect("kota.db") as db:
-        async with db.execute("SELECT kalan_kota FROM kullanicilar WHERE user_id = ?", (user_id,)) as cursor:
-            row = await cursor.fetchone()
-            if row is None:
-                await db.execute("INSERT INTO kullanicilar (user_id, kalan_kota) VALUES (?, ?)", (user_id, MAX_KOTA))
-                await db.commit()
-                return MAX_KOTA
-            return row[0]
+# --- GECE 00:00 KOTA SIFIRLAMA GÖREVİ ---
+@tasks.loop(minutes=1)
+async def check_daily_reset():
+    now = datetime.datetime.utcnow()
+    # Gece 00:00 kontrolü
+    if now.hour == 0 and now.minute == 0:
+        async with aiosqlite.connect("kota.db") as db:
+            await db.execute("UPDATE quotas SET remaining_quota = 10")
+            await db.commit()
+        print("✅ Tüm kullanıcıların günlük kotaları 10/10 olarak sıfırlandı.")
 
-async def update_kota(user_id: int, yeni_kota: int):
-    async with aiosqlite.connect("kota.db") as db:
-        await db.execute("UPDATE kullanicilar SET kalan_kota = ? WHERE user_id = ?", (yeni_kota, user_id))
-        await db.commit()
-
-# --- GECE 00:00 KOTA SIFIRLAMA ---
-@tasks.loop(time=time(hour=0, minute=0, second=0, tzinfo=timezone.utc))
-async def reset_kotalar():
-    async with aiosqlite.connect("kota.db") as db:
-        await db.execute("UPDATE kullanicilar SET kalan_kota = ?", (MAX_KOTA,))
-        await db.commit()
-    print("[SİSTEM] Gece 00:00: Tüm kotalar 10 olarak yenilendi.")
-
-# --- BOT OLAYLARI ---
+# --- BOT HAZIR OLDUĞUNDA ---
 @bot.event
 async def on_ready():
     await init_db()
-    if not reset_kotalar.is_running():
-        reset_kotalar.start()
+    check_daily_reset.start()
     
     guild = discord.Object(id=GUILD_ID)
-    bot.tree.copy_global_to(guild=guild)
-    await bot.tree.sync(guild=guild)
+    try:
+        synced = await bot.tree.sync(guild=guild)
+        print(f"✅ {len(synced)} komut sunucuya senkronize edildi.")
+    except Exception as e:
+        print(f"❌ Komut senkronizasyon hatası: {e}")
+
     print(f"✅ {bot.user.name} OGS Community için başarıyla bağlandı!")
 
-# --- SLASH KOMUTLARI ---
+# --- /KOTA KOMUTU ---
+@bot.tree.command(name="kota", description="Mevcut günlük klip kotanızı kontrol edin.")
+async def kota(interaction: discord.Interaction):
+    user_id = interaction.user.id
 
-@bot.tree.command(name="kota", description="Kalan clip alma kotanı gösterir.")
-async def kota_sorgula(interaction: discord.Interaction):
-    role = interaction.guild.get_role(PREMIUM_ROLE_ID)
-    if role not in interaction.user.roles:
-        await interaction.response.send_message("❌ Bu komutu sadece **OGS Premium** üyeleri kullanabilir.", ephemeral=True)
+    # Senin ID'n için özel kontrol
+    if user_id == MY_ID:
+        embed = discord.Embed(
+            title="📊 Günlük Klip Kotan",
+            description="Kalan Kotan: **∞ / Sınırsız** (Kurucu Yetkisi)",
+            color=discord.Color.gold()
+        )
+        embed.set_footer(text="OGS Community • Premium Clip Sistemi")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
-    kalan = await get_kota(interaction.user.id)
+    # Normal kullanıcı kontrolü
+    async with aiosqlite.connect("kota.db") as db:
+        async with db.execute("SELECT remaining_quota FROM quotas WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            remaining = row[0] if row else 10
+
     embed = discord.Embed(
-        title="🎬 OGS Premium Clip Kotası",
-        description=f"Merhaba {interaction.user.mention},\n\n**Kalan Clip Hakkın:** `{kalan} / {MAX_KOTA}`\n**Sıfırlanma Saati:** Gece 00:00 (TSİ)",
-        color=discord.Color.gold()
+        title="📊 Günlük Klip Kotan",
+        description=f"Kalan Kotan: **{remaining} / 10**",
+        color=discord.Color.blue()
     )
     embed.set_footer(text="OGS Community • Premium Clip Sistemi")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="clip", description="Clip alma isteği gönderir ve kotadan 1 düşer.")
-async def clip_al(interaction: discord.Interaction, clip_url: str):
-    role = interaction.guild.get_role(PREMIUM_ROLE_ID)
-    if role not in interaction.user.roles:
-        await interaction.response.send_message("❌ Clip almak için **OGS Premium** üyesi olmalısın.", ephemeral=True)
+# --- /CLIP KOMUTU ---
+@bot.tree.command(name="clip", description="Clip linki gönderirsiniz ve kotanızdan 1 düşer.")
+async def clip(interaction: discord.Interaction, link: str):
+    user_id = interaction.user.id
+
+    # 1. SENİN İÇİN SINIRSIZ KOTA (Sizin ID'niz)
+    if user_id == MY_ID:
+        embed = discord.Embed(
+            title="✅ Clip İsteği Alındı",
+            color=discord.Color.gold()
+        )
+        embed.add_field(name="Link:", value=link, inline=False)
+        embed.add_field(name="Kalan Kotan:", value="∞ / Sınırsız", inline=False)
+        embed.set_footer(text="OGS Community • Premium Clip Sistemi")
+
+        await interaction.response.send_message(embed=embed)
         return
 
-    kalan = await get_kota(interaction.user.id)
-    if kalan <= 0:
-        await interaction.response.send_message("⚠️ Günlük **10/10** clip alma limitine ulaştın! Kotan gece 00:00'da yenilenecek.", ephemeral=True)
-        return
+    # 2. NORMAL PREMİUM ÜYELER İÇİN KOTA İŞLEMLERİ
+    async with aiosqlite.connect("kota.db") as db:
+        async with db.execute("SELECT remaining_quota FROM quotas WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            remaining = row[0] if row is not None else 10
 
-    yeni_kota = kalan - 1
-    await update_kota(interaction.user.id, yeni_kota)
+            if remaining <= 0:
+                await interaction.response.send_message(
+                    "❌ Bugünkü klip kotan doldu! Yarın gece 00:00'da tekrar yenilenecektir.", 
+                    ephemeral=True
+                )
+                return
 
-    embed = discord.Embed(
-        title="✅ Clip İsteği Alındı",
-        description=f"**Link:** {clip_url}\n\n**Kalan Kotan:** `{yeni_kota} / {MAX_KOTA}`",
-        color=discord.Color.green()
-    )
-    embed.set_footer(text="OGS Community • Premium Clip Sistemi")
-    await interaction.response.send_message(embed=embed)
-from flask import Flask
-from threading import Thread
+            new_quota = remaining - 1
+            await db.execute(
+                "INSERT INTO quotas (user_id, remaining_quota) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET remaining_quota = ?",
+                (user_id, new_quota, new_quota)
+            )
+            await db.commit()
 
-app = Flask('')
-@app.route('/')
-def home(): return "Bot Aktif!"
-Thread(target=lambda: app.run(host='0.0.0.0', port=10000)).start()
+            embed = discord.Embed(
+                title="✅ Clip İsteği Alındı",
+                color=discord.Color.green()
+            )
+            embed.add_field(name="Link:", value=link, inline=False)
+            embed.add_field(name="Kalan Kotan:", value=f"{new_quota} / 10", inline=False)
+            embed.set_footer(text="OGS Community • Premium Clip Sistemi")
 
-bot.run(TOKEN)
+            await interaction.response.send_message(embed=embed)
+
+# --- BOTU BAŞLAT ---
+if __name__ == "__main__":
+    keep_alive()
+    TOKEN = os.getenv("DISCORD_TOKEN")
+    if TOKEN:
+        bot.run(TOKEN)
+    else:
+        print("❌ HATA: DISCORD_TOKEN çevre değişkeni bulunamadı!")
