@@ -6,7 +6,8 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 # --- BOT VE SUNUCU AYARLARI ---
-TOKEN = "MTUzODUwOTQxNzMzMzUyMjQ1Mg.Gb9qIo.oaKFBlGYZ66kN0oNhwRq470hJwVceaCghz6I2o"  # <--- Bot Token'ını buraya tırnakların içine yapıştır
+import os
+TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = 1429466809110626377
 PREMIUM_ROLE_ID = 1429471364225433620
 MAX_KOTA = 10
