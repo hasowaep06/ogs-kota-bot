@@ -50,7 +50,6 @@ async def init_db():
 @tasks.loop(minutes=1)
 async def check_daily_reset():
     now = datetime.datetime.utcnow()
-    # Gece 00:00 kontrolü
     if now.hour == 0 and now.minute == 0:
         async with aiosqlite.connect("kota.db") as db:
             await db.execute("UPDATE quotas SET remaining_quota = 10")
@@ -61,12 +60,16 @@ async def check_daily_reset():
 @bot.event
 async def on_ready():
     await init_db()
-    check_daily_reset.start()
+    
+    if not check_daily_reset.is_running():
+        check_daily_reset.start()
     
     guild = discord.Object(id=GUILD_ID)
     try:
+        # Komutları sunucuya kopyalayıp anında senkronize ediyoruz
+        bot.tree.copy_global_to_guild(guild=guild)
         synced = await bot.tree.sync(guild=guild)
-        print(f"✅ {len(synced)} komut sunucuya senkronize edildi.")
+        print(f"✅ {len(synced)} komut OGS sunucusuna başarıyla senkronize edildi!")
     except Exception as e:
         print(f"❌ Komut senkronizasyon hatası: {e}")
 
@@ -77,7 +80,6 @@ async def on_ready():
 async def kota(interaction: discord.Interaction):
     user_id = interaction.user.id
 
-    # Senin ID'n için özel kontrol
     if user_id == MY_ID:
         embed = discord.Embed(
             title="📊 Günlük Klip Kotan",
@@ -88,7 +90,6 @@ async def kota(interaction: discord.Interaction):
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
-    # Normal kullanıcı kontrolü
     async with aiosqlite.connect("kota.db") as db:
         async with db.execute("SELECT remaining_quota FROM quotas WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
@@ -107,7 +108,6 @@ async def kota(interaction: discord.Interaction):
 async def clip(interaction: discord.Interaction, link: str):
     user_id = interaction.user.id
 
-    # 1. SENİN İÇİN SINIRSIZ KOTA (Sizin ID'niz)
     if user_id == MY_ID:
         embed = discord.Embed(
             title="✅ Clip İsteği Alındı",
@@ -120,7 +120,6 @@ async def clip(interaction: discord.Interaction, link: str):
         await interaction.response.send_message(embed=embed)
         return
 
-    # 2. NORMAL PREMİUM ÜYELER İÇİN KOTA İŞLEMLERİ
     async with aiosqlite.connect("kota.db") as db:
         async with db.execute("SELECT remaining_quota FROM quotas WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
