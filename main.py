@@ -110,15 +110,18 @@ async def on_ready():
     
     guild_obj = discord.Object(id=GUILD_ID)
     try:
-        # Hem sunucuya hem globale senkronize et (Çift garanti)
+        # 1. Önce bu sunucudaki eski/çakışan komut ağacını tamamen temizle
+        bot.tree.clear_commands(guild=guild_obj)
+        
+        # 2. Komutları doğrudan OGS sunucusuna kopyala ve senkronize et
         bot.tree.copy_global_to_guild(guild=guild_obj)
-        synced_guild = await bot.tree.sync(guild=guild_obj)
-        synced_global = await bot.tree.sync()
-        print(f"✅ {len(synced_guild)} komut sunucuya, {len(synced_global)} komut globale yüklendi!")
+        synced = await bot.tree.sync(guild=guild_obj)
+        
+        print(f"✅ BAŞARILI: {len(synced)} komut OGS sunucusuna yüklendi!")
     except Exception as e:
         print(f"❌ Komut senkronizasyon hatası: {e}")
 
-    print(f"✅ {bot.user.name} OGS Community için başarıyla çalışıyor!")
+    print(f"✅ {bot.user.name} çalışmaya hazır!")
 
 # --- /KOTA KOMUTU ---
 @bot.tree.command(name="kota", description="Mevcut günlük klip kotanızı kontrol edin.")
