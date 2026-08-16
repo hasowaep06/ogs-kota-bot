@@ -31,8 +31,7 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 GUILD_ID = 1429466809110626377
-PREMIUM_ROLE_ID = 1429471364225433620
-MY_ID = 1266281343957078029  # Senin Discord ID'n (Sınırsız Kota)
+MY_ID = 1266281343957078029  # Senin Discord ID'n (Sınırsız Kota & Yetkili)
 
 # --- VERİTABANI İŞLEMLERİ ---
 async def init_db():
@@ -56,6 +55,51 @@ async def check_daily_reset():
             await db.commit()
         print("✅ Tüm kullanıcıların günlük kotaları 10/10 olarak sıfırlandı.")
 
+# --- ERİŞİM ONAY / RED BUTONLARI ---
+class AccessRequestView(discord.ui.View):
+    def __init__(self, requester: discord.User, comp_name: str):
+        super().__init__(timeout=None)
+        self.requester = requester
+        self.comp_name = comp_name
+
+    @discord.ui.button(label="Onayla ✅", style=discord.ButtonStyle.green, custom_id="access_approve")
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for child in self.children:
+            child.disabled = True
+        
+        embed = interaction.message.embeds[0]
+        embed.color = discord.Color.green()
+        embed.add_field(name="Durum", value="🟢 **ONAYLANDI**", inline=False)
+        embed.add_field(name="Erişimi Veren Yetkili", value=interaction.user.mention, inline=False)
+        
+        await interaction.response.edit_message(embed=embed, view=self)
+
+        try:
+            await self.requester.send(
+                f"🎉 **{self.comp_name}** comp'u için erişim talebiniz **{interaction.user.display_name}** tarafından **ONAYLANDI**!"
+            )
+        except Exception:
+            pass
+
+    @discord.ui.button(label="Reddet ❌", style=discord.ButtonStyle.danger, custom_id="access_reject")
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for child in self.children:
+            child.disabled = True
+        
+        embed = interaction.message.embeds[0]
+        embed.color = discord.Color.red()
+        embed.add_field(name="Durum", value="🔴 **REDDEDİLDİ**", inline=False)
+        embed.add_field(name="İşlemi Yapan Yetkili", value=interaction.user.mention, inline=False)
+        
+        await interaction.response.edit_message(embed=embed, view=self)
+
+        try:
+            await self.requester.send(
+                f"❌ **{self.comp_name}** comp'u için erişim talebiniz **{interaction.user.display_name}** tarafından **REDDEDİLDİ**."
+            )
+        except Exception:
+            pass
+
 # --- BOT HAZIR OLDUĞUNDA ---
 @bot.event
 async def on_ready():
@@ -66,7 +110,6 @@ async def on_ready():
     
     guild = discord.Object(id=GUILD_ID)
     try:
-        # Komutları sunucuya kopyalayıp anında senkronize ediyoruz
         bot.tree.copy_global_to_guild(guild=guild)
         synced = await bot.tree.sync(guild=guild)
         print(f"✅ {len(synced)} komut OGS sunucusuna başarıyla senkronize edildi!")
@@ -148,6 +191,36 @@ async def clip(interaction: discord.Interaction, link: str):
             embed.set_footer(text="OGS Community • Premium Clip Sistemi")
 
             await interaction.response.send_message(embed=embed)
+
+# --- /ERISIM KOMUTU ---
+@bot.tree.command(name="erisim", description="Bir comp için erişim talebinde bulunursunuz.")
+@app_commands.describe(comp_adi="Erişim istemek istediğiniz comp veya projenin adı")
+async def erisim(interaction: discord.Interaction, comp_adi: str):
+    requester = interaction.user
+
+    try:
+        admin_user = await bot.fetch_user(MY_ID)
+        
+        embed = discord.Embed(
+            title="📩 Yeni Erişim Talebi",
+            color=discord.Color.gold()
+        )
+        embed.add_field(name="Talep Eden Üye", value=f"{requester.mention} (`{requester.id}`)", inline=False)
+        embed.add_field(name="Erişim İstenen Comp", value=f"**{comp_adi}**", inline=False)
+        embed.set_footer(text="OGS Community • Erişim Onay Sistemi")
+        
+        view = AccessRequestView(requester=requester, comp_name=comp_adi)
+        await admin_user.send(embed=embed, view=view)
+
+        await interaction.response.send_message(
+            f"✅ **{comp_adi}** için erişim talebiniz yetkililere iletildi! Onaylandığında bilgilendirileceksiniz.",
+            ephemeral=True
+        )
+    except Exception as e:
+        await interaction.response.send_message(
+            f"❌ Talebiniz iletilirken bir hata oluştu: {e}",
+            ephemeral=True
+        )
 
 # --- BOTU BAŞLAT ---
 if __name__ == "__main__":
