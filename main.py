@@ -65,19 +65,42 @@ class AccessRequestView(discord.ui.View):
 
     @discord.ui.button(label="Onayla ✅", style=discord.ButtonStyle.green, custom_id="access_approve")
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        user_id = self.requester.id
+
+        # Sahip haricindeki üyelerin kotasından 1 düşürüyoruz
+        if user_id != MY_ID:
+            async with aiosqlite.connect("kota.db") as db:
+                async with db.execute("SELECT remaining_quota FROM quotas WHERE user_id = ?", (user_id,)) as cursor:
+                    row = await cursor.fetchone()
+                    remaining = row[0] if row is not None else 10
+
+                    if remaining <= 0:
+                        await interaction.response.send_message(
+                            f"⚠️ {self.requester.mention} adlı kullanıcının kotası dolduğu için erişim onaylanamadı!", 
+                            ephemeral=True
+                        )
+                        return
+
+                    new_quota = remaining - 1
+                    await db.execute(
+                        "INSERT INTO quotas (user_id, remaining_quota) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET remaining_quota = ?",
+                        (user_id, new_quota, new_quota)
+                    )
+                    await db.commit()
+
         for child in self.children:
             child.disabled = True
         
         embed = interaction.message.embeds[0]
         embed.color = discord.Color.green()
-        embed.add_field(name="Durum", value="🟢 **ONAYLANDI**", inline=False)
+        embed.add_field(name="Durum", value="🟢 **ONAYLANDI (Kotadan 1 Düşüldü)**", inline=False)
         embed.add_field(name="Erişimi Veren Yetkili", value=interaction.user.mention, inline=False)
         
         await interaction.response.edit_message(embed=embed, view=self)
 
         try:
             await self.requester.send(
-                f"🎉 **{self.comp_name}** comp'u için erişim talebiniz **{interaction.user.display_name}** tarafından **ONAYLANDI**!"
+                f"🎉 **{self.comp_name}** comp'u için erişim talebiniz **{interaction.user.display_name}** tarafından **ONAYLANDI**! (Kotanızdan 1 düştü)."
             )
         except Exception:
             pass
@@ -214,9 +237,8 @@ async def on_ready():
         check_daily_reset.start()
     
     try:
-        # Doğrudan OGS sunucusuna tanımlanan komutları senkronize et
         synced = await bot.tree.sync(guild=GUILD_OBJ)
-        print(f"✅ BİNGO: {len(synced)} komut OGS sunucusuna sıfır hatayla yüklendi!")
+        print(f"✅ {len(synced)} komut OGS sunucusuna başarıyla yüklendi!")
     except Exception as e:
         print(f"❌ Komut senkronizasyon hatası: {e}")
 
